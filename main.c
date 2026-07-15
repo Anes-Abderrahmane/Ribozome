@@ -218,19 +218,46 @@ static void tokenize_file(const char *buffer, Queue *queue)
     }
 }
 
-static void print_queue(const Queue *queue)
+static int extract_release_exit(const LineList *line, int *status_code)
 {
-    QueueNode *node = queue->front;
-    while (node) {
-        LineList *line = node->line;
-        printf("Line %d:", line->line_number);
+    for (Token *token = line->head; token; token = token->next) {
+        if (token->type == TOKEN_IDENTIFIER && strcmp(token->data, "release") == 0) {
+            Token *next = token->next;
+            Token *number = next ? next->next : NULL;
+            Token *close = number ? number->next : NULL;
 
-        for (Token *token = line->head; token; token = token->next) {
-            printf(" [%s]", token->data);
+            if (next && next->type == TOKEN_OPEN_PAR && number && number->type == TOKEN_NUMBER && close && close->type == TOKEN_CLOSE_PAR) {
+                *status_code = atoi(number->data);
+                return 1;
+            }
         }
-        putchar('\n');
-        node = node->next;
     }
+
+    return 0;
+}
+
+static void write_asm_file(const Queue *queue, const char *filename)
+{
+    FILE *out = fopen(filename, "w");
+    if (!out) {
+        perror("fopen");
+        return;
+    }
+
+    fprintf(out, "global _start\nsection .text\n_start:\n");
+
+    int wrote_any = 0;
+    for (QueueNode *node = queue->front; node; node = node->next) {
+        int status = 0;
+        if (extract_release_exit(node->line, &status)) {
+            fprintf(out, "    mov rax, 60\n");
+            fprintf(out, "    mov rdi, %d\n", status);
+            fprintf(out, "    syscall\n");
+            wrote_any = 1;
+        }
+    }
+
+    fclose(out);
 }
 
 static void free_tokens(Token *token)
@@ -303,11 +330,16 @@ int main(int argc, char **argv)
     buffer[length] = '\0';
     fclose(f);
 
+
+
     Queue queue = { 0 };
     tokenize_file(buffer, &queue);
-    print_queue(&queue);
+    write_asm_file(&queue, "output.asm");
 
     free(buffer);
     free_queue(&queue);
+    system("nasm -f elf64 output.asm -o output.o");
+    system("ld output.o -o output");
+    system("rm output.o output.asm");
     return 0;
 }
