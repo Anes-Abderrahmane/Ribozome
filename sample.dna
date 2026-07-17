@@ -1,0 +1,6 @@
+NUCLEUS {
+    NUCLEOTIDE x = 42;
+    NUCLEOTIDE y = -x;
+    EXPRESS "Hello\nWorld";
+    EXPRESS "Tab\tDone";
+}

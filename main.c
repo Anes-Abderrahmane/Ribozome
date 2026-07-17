@@ -1,345 +1,156 @@
-#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-typedef enum {
-    TOKEN_IDENTIFIER,
-    TOKEN_NUMBER,
-    TOKEN_SEPARATOR,
-    TOKEN_OPEN_PAR,
-    TOKEN_CLOSE_PAR,
-    TOKEN_OPEN_CURLY,
-    TOKEN_CLOSE_CURLY,
-    TOKEN_OPEN_SQUARE,
-    TOKEN_CLOSE_SQUARE,
-    TOKEN_OTHER
-} token_type_t;
+#include "lexer.h"
+#include "parser.h"
+#include "codegen.h"
 
-typedef struct Token {
-    char *data;
-    token_type_t type;
-    struct Token *next;
-} Token;
-
-typedef struct LineList {
-    int line_number;
-    Token *head;
-    Token *tail;
-    struct LineList *next;
-} LineList;
-
-typedef struct QueueNode {
-    LineList *line;
-    struct QueueNode *next;
-} QueueNode;
-
-typedef struct Queue {
-    QueueNode *front;
-    QueueNode *rear;
-} Queue;
-
-static Token *create_token(const char *text, token_type_t type)
-{
-    Token *token = malloc(sizeof(*token));
-    if (!token) {
+static char *read_file(const char *path) {
+    FILE *file = fopen(path, "rb");
+    if (!file) {
         return NULL;
     }
 
-    token->data = malloc(strlen(text) + 1);
-    if (!token->data) {
-        free(token);
+    if (fseek(file, 0, SEEK_END) != 0) {
+        fclose(file);
         return NULL;
     }
 
-    strcpy(token->data, text);
-    token->type = type;
-    token->next = NULL;
-    return token;
-}
-
-static void append_token(LineList *line, Token *token)
-{
-    if (!line->head) {
-        line->head = token;
-        line->tail = token;
-    } else {
-        line->tail->next = token;
-        line->tail = token;
-    }
-}
-
-static LineList *create_line_list(int line_number)
-{
-    LineList *line = malloc(sizeof(*line));
-    if (!line) {
+    long size = ftell(file);
+    if (size < 0) {
+        fclose(file);
         return NULL;
     }
 
-    line->line_number = line_number;
-    line->head = NULL;
-    line->tail = NULL;
-    line->next = NULL;
-    return line;
-}
-
-static void enqueue_line(Queue *queue, LineList *line)
-{
-    QueueNode *node = malloc(sizeof(*node));
-    if (!node) {
-        return;
+    if (fseek(file, 0, SEEK_SET) != 0) {
+        fclose(file);
+        return NULL;
     }
 
-    node->line = line;
-    node->next = NULL;
-
-    if (!queue->rear) {
-        queue->front = node;
-        queue->rear = node;
-    } else {
-        queue->rear->next = node;
-        queue->rear = node;
-    }
-}
-
-static void tokenize_line(const char *line_text, LineList *line)
-{
-    int i = 0;
-    while (line_text[i] != '\0') {
-        unsigned char ch = (unsigned char)line_text[i];
-
-        if (isspace(ch)) {
-            i++;
-            continue;
-        }
-
-        if (ch == '!') {
-            Token *token = create_token("!", TOKEN_SEPARATOR);
-            append_token(line, token);
-            i++;
-        } else if (ch == '(') {
-            Token *token = create_token("(", TOKEN_OPEN_PAR);
-            append_token(line, token);
-            i++;
-        } else if (ch == ')') {
-            Token *token = create_token(")", TOKEN_CLOSE_PAR);
-            append_token(line, token);
-            i++;
-        } else if (ch == '{') {
-            Token *token = create_token("{", TOKEN_OPEN_CURLY);
-            append_token(line, token);
-            i++;
-        } else if (ch == '}') {
-            Token *token = create_token("}", TOKEN_CLOSE_CURLY);
-            append_token(line, token);
-            i++;
-        } else if (ch == '[') {
-            Token *token = create_token("[", TOKEN_OPEN_SQUARE);
-            append_token(line, token);
-            i++;
-        } else if (ch == ']') {
-            Token *token = create_token("]", TOKEN_CLOSE_SQUARE);
-            append_token(line, token);
-            i++;
-        } else if (isalpha(ch)) {
-            int j = 0;
-            char *word = malloc(256);
-            if (!word) {
-                return;
-            }
-
-            while (isalpha((unsigned char)line_text[i + j]) && j < 255) {
-                word[j] = line_text[i + j];
-                j++;
-            }
-            word[j] = '\0';
-
-            Token *token = create_token(word, TOKEN_IDENTIFIER);
-            append_token(line, token);
-            free(word);
-            i += j;
-        } else if (isdigit(ch)) {
-            int j = 0;
-            char *number = malloc(256);
-            if (!number) {
-                return;
-            }
-
-            while (isdigit((unsigned char)line_text[i + j]) && j < 255) {
-                number[j] = line_text[i + j];
-                j++;
-            }
-            number[j] = '\0';
-
-            Token *token = create_token(number, TOKEN_NUMBER);
-            append_token(line, token);
-            free(number);
-            i += j;
-        } else {
-            char single[2] = { (char)ch, '\0' };
-            Token *token = create_token(single, TOKEN_OTHER);
-            append_token(line, token);
-            i++;
-        }
-    }
-}
-
-static void tokenize_file(const char *buffer, Queue *queue)
-{
-    const char *cursor = buffer;
-    int line_number = 1;
-
-    while (*cursor != '\0') {
-        const char *line_start = cursor;
-        while (*cursor != '\0' && *cursor != '\n') {
-            cursor++;
-        }
-
-        size_t line_length = (size_t)(cursor - line_start);
-        char *line_copy = malloc(line_length + 1);
-        if (!line_copy) {
-            return;
-        }
-
-        memcpy(line_copy, line_start, line_length);
-        line_copy[line_length] = '\0';
-
-        LineList *line = create_line_list(line_number++);
-        if (line) {
-            tokenize_line(line_copy, line);
-            enqueue_line(queue, line);
-        }
-
-        free(line_copy);
-
-        if (*cursor == '\n') {
-            cursor++;
-        }
-    }
-}
-
-static int extract_release_exit(const LineList *line, int *status_code)
-{
-    for (Token *token = line->head; token; token = token->next) {
-        if (token->type == TOKEN_IDENTIFIER && strcmp(token->data, "release") == 0) {
-            Token *next = token->next;
-            Token *number = next ? next->next : NULL;
-            Token *close = number ? number->next : NULL;
-
-            if (next && next->type == TOKEN_OPEN_PAR && number && number->type == TOKEN_NUMBER && close && close->type == TOKEN_CLOSE_PAR) {
-                *status_code = atoi(number->data);
-                return 1;
-            }
-        }
-    }
-
-    return 0;
-}
-
-static void write_asm_file(const Queue *queue, const char *filename)
-{
-    FILE *out = fopen(filename, "w");
-    if (!out) {
-        perror("fopen");
-        return;
-    }
-
-    fprintf(out, "global _start\nsection .text\n_start:\n");
-
-    int wrote_any = 0;
-    for (QueueNode *node = queue->front; node; node = node->next) {
-        int status = 0;
-        if (extract_release_exit(node->line, &status)) {
-            fprintf(out, "    mov rax, 60\n");
-            fprintf(out, "    mov rdi, %d\n", status);
-            fprintf(out, "    syscall\n");
-            wrote_any = 1;
-        }
-    }
-
-    fclose(out);
-}
-
-static void free_tokens(Token *token)
-{
-    while (token) {
-        Token *next = token->next;
-        free(token->data);
-        free(token);
-        token = next;
-    }
-}
-
-static void free_queue(Queue *queue)
-{
-    QueueNode *node = queue->front;
-    while (node) {
-        QueueNode *next = node->next;
-        free_tokens(node->line->head);
-        free(node->line);
-        free(node);
-        node = next;
-    }
-}
-
-int main(int argc, char **argv)
-{
-    if (argc != 2) {
-        fprintf(stderr, "Usage: %s <file.dna>\n", argv[0]);
-        return 1;
-    }
-
-    char *buffer = NULL;
-    long length;
-    FILE *f = fopen(argv[1], "rb");
-
-    if (!f) {
-        perror("fopen");
-        return 1;
-    }
-
-    if (fseek(f, 0, SEEK_END) != 0) {
-        perror("fseek");
-        fclose(f);
-        return 1;
-    }
-
-    length = ftell(f);
-    if (length < 0) {
-        perror("ftell");
-        fclose(f);
-        return 1;
-    }
-
-    rewind(f);
-
-    buffer = malloc((size_t)length + 1);
+    char *buffer = malloc((size_t)size + 1);
     if (!buffer) {
-        fprintf(stderr, "malloc failed\n");
-        fclose(f);
-        return 1;
+        fclose(file);
+        return NULL;
     }
 
-    if (fread(buffer, 1, (size_t)length, f) != (size_t)length) {
-        fprintf(stderr, "fread failed\n");
+    size_t read_count = fread(buffer, 1, (size_t)size, file);
+    fclose(file);
+
+    if (read_count != (size_t)size) {
         free(buffer);
-        fclose(f);
-        return 1;
+        return NULL;
     }
 
-    buffer[length] = '\0';
-    fclose(f);
+    buffer[size] = '\0';
+    return buffer;
+}
 
+static void print_tokens(const Token *tokens, size_t count) {
+    for (size_t i = 0; i < count; ++i) {
+        printf("%zu:%zu %-16s '%s'\n",
+               tokens[i].line,
+               tokens[i].column,
+               token_type_name(tokens[i].type),
+               tokens[i].lexeme);
+    }
+}
 
+int main(int argc, char *argv[]) {
+    int verbose = 0;
+    const char *source_path = NULL;
 
-    Queue queue = { 0 };
-    tokenize_file(buffer, &queue);
-    write_asm_file(&queue, "output.asm");
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--verbose") == 0) {
+            verbose = 1;
+        } else if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
+            printf("Usage: %s [options] <source.dna>\n", argv[0]);
+            printf("Options:\n");
+            printf("  -v, --verbose  Print tokens and AST details\n");
+            printf("  -h, --help     Show this help message\n");
+            return EXIT_SUCCESS;
+        } else if (argv[i][0] == '-' && argv[i][1] != '\0') {
+            fprintf(stderr, "Unknown option '%s'\n", argv[i]);
+            return EXIT_FAILURE;
+        } else if (!source_path) {
+            source_path = argv[i];
+        } else {
+            fprintf(stderr, "Unexpected argument '%s'\n", argv[i]);
+            return EXIT_FAILURE;
+        }
+    }
 
-    free(buffer);
-    free_queue(&queue);
-    system("nasm -f elf64 output.asm -o output.o");
-    system("ld output.o -o output");
-    system("rm output.o output.asm");
-    return 0;
+    if (!source_path) {
+        fprintf(stderr, "Usage: %s [options] <source.dna>\n", argv[0]);
+        return EXIT_FAILURE;
+    }
+
+    char *source = read_file(source_path);
+    if (!source) {
+        fprintf(stderr, "Unable to read source file '%s'\n", source_path);
+        return EXIT_FAILURE;
+    }
+
+    size_t token_count = 0;
+    Token *tokens = tokenize(source, &token_count);
+    if (!tokens) {
+        free(source);
+        fprintf(stderr, "Failed to tokenize source.\n");
+        return EXIT_FAILURE;
+    }
+
+    if (verbose) {
+        print_tokens(tokens, token_count);
+    }
+
+    ASTNode *ast = parse_tokens(tokens, token_count);
+    if (!ast) {
+        free_tokens(tokens, token_count);
+        free(source);
+        return EXIT_FAILURE;
+    }
+
+    if (verbose) {
+        printf("AST root: %s\n", ast_node_type_name(ast->type));
+    }
+
+    if (generate_rna(ast) != 0) {
+        fprintf(stderr, "Failed to generate output.rna\n");
+        free_ast(ast);
+        free_tokens(tokens, token_count);
+        free(source);
+        return EXIT_FAILURE;
+    }
+
+    printf("Generated output.rna\n");
+
+    if (system("./translator output.rna output.asm") != 0) {
+        fprintf(stderr, "Failed to translate output.rna to output.asm\n");
+        free_ast(ast);
+        free_tokens(tokens, token_count);
+        free(source);
+        return EXIT_FAILURE;
+    }
+
+    if (system("nasm -f elf64 output.asm -o output.o") != 0) {
+        fprintf(stderr, "Failed to assemble output.asm\n");
+        free_ast(ast);
+        free_tokens(tokens, token_count);
+        free(source);
+        return EXIT_FAILURE;
+    }
+
+    if (system("ld output.o -o output.protein -e NUCLEUS") != 0) {
+        fprintf(stderr, "Failed to link output.o into output.protein\n");
+        free_ast(ast);
+        free_tokens(tokens, token_count);
+        free(source);
+        return EXIT_FAILURE;
+    }
+
+    printf("Built final executable: output.protein\n");
+    free_ast(ast);
+    free_tokens(tokens, token_count);
+    free(source);
+    return EXIT_SUCCESS;
 }

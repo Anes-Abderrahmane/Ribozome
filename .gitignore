@@ -1,0 +1,9 @@
+# Build artifacts
+main
+translator
+*.o
+*.d
+output.rna
+output.asm
+output.o
+output.protein
